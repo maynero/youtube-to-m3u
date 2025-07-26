@@ -13,7 +13,7 @@ youtube_non_stream_link.py - Same as youtube-non-server.py but doesn't require s
 
 ## Requirements
 ### All Versions
-python - must be 3.10 or higher (3.8 or lower is not supported by streamlink)
+python - must be 3.10 or higher (3.8 or lower is not supported by streamlink) <br>
 requests (can be installed by typing ```pip install requests``` at cmd/terminal window) <br>
 
 ### All Versions except youtube_non_stream_link.py
