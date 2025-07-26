@@ -14,6 +14,7 @@ youtube_non_stream_link.py - Same as youtube-non-server.py but doesn't require s
 ## Requirements
 ### All Versions
 python - must be 3.10 or higher (3.8 or lower is not supported by streamlink)
+requests (can be installed by typing ```pip install requests``` at cmd/terminal window) <br>
 
 ### All Versions except youtube_non_stream_link.py
 install [streamlink](https://streamlink.github.io/install.html) and make it available at path
@@ -23,7 +24,6 @@ flask (can be installed by typing ```pip install flask``` at cmd/terminal window
 youtubelive.m3u
 
 ### youtube-non-server.py and youtube_non_stream_link.py<br>
-requests (can be installed by typing ```pip install requests``` at cmd/terminal window) <br>
 youtubelinks.xml
 
 ## Verify streamlink install
@@ -59,7 +59,7 @@ python youtube-live.py or python3 youtube-live.py if you have the old python2 in
 <br>
 Script must be running for the m3u to work
 
-## How To Use youtube-non-server.py
+## How To Use youtube-non-server.py or youtube_non_stream_link.py
 Open youtubelinks.xml in a code text editor eg notepad++ <br>
 Add in your channel details for your youtube stream in the following format
 
