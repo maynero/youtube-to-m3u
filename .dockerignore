@@ -1,0 +1,25 @@
+# Python cache and build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.env/
+*.env
+
+# Git and version control
+.git/
+.gitignore
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation and markdown
+README.md
+
+# Other files you don't need in the image
+youtubelinks.xml
+youtubelive.m3u
