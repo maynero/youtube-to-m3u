@@ -37,6 +37,19 @@ If it says unknown command/'streamlink' is not recognized as an internal or exte
 operable program or batch file. <br>
 Then you need to make sure you have installed streamlink to path/environmental variables
 
+## Run locally
+```bash
+python3 -m venv .venv_ytm3u
+source .venv_ytm3u/bin/activate
+pip install -r requirements.txt
+python3 youtube-live.py
+```
+
+## Run on docker
+```bash
+docker run -p 6095:6095 --name ytm3u -d ghcr.io/maynero/youtube-to-m3u:latest
+```
+
 ## How To Use youtube-live.py
 Open youtubelive.m3u <br>
 Change the ip address in the streamlink to the ip address of the machine running the script <br>
@@ -65,13 +78,13 @@ Add in your channel details for your youtube stream in the following format
 
 ```
 <channel>
-        <channel-name>ABC News</channel-name>
-        <tvg-id>ABCNEWS.us</tvg-id>
-        <tvg-name>ABC News</tvg-name>
-        <tvg-logo>https://github.com/tv-logo/tv-logos/blob/main/countries/united-states/abc-news-light-us.png?raw=true</tvg-logo>
-        <group-title>News</group-title>
-        <youtube-url>https://www.youtube.com/@abcnews/live</youtube-url>
-    </channel>
+    <channel-name>ABC News</channel-name>
+    <tvg-id>ABCNEWS.us</tvg-id>
+    <tvg-name>ABC News</tvg-name>
+    <tvg-logo>https://github.com/tv-logo/tv-logos/blob/main/countries/united-states/abc-news-light-us.png?raw=true</tvg-logo>
+    <group-title>News</group-title>
+    <youtube-url>https://www.youtube.com/@abcnews/live</youtube-url>
+</channel>
 ```
 
 channel-name = name of channel <br>
