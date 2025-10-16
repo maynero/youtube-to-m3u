@@ -20,6 +20,8 @@ def stream():
     if not url:
         return jsonify({'error': 'URL parameter is required'}), 400
 
+    quality = request.args.get('quality', 'best')
+
     try:
         # Get stream info with more detailed output
         info_command = ['streamlink', '--json', '--loglevel', 'debug', url]
@@ -57,7 +59,7 @@ def stream():
                 stream_info = json.loads(
                     info_output.decode('utf-8', errors='replace'))
 
-        best_quality = stream_info['streams'].get('best')
+        best_quality = stream_info['streams'].get(quality)
         if not best_quality:
             return jsonify({'error': 'No valid streams found'}), 404
 
@@ -65,7 +67,7 @@ def stream():
         command = [
             'streamlink',
             url,
-            'best',
+            quality,
             '--hls-live-restart',
             '--stdout'
         ]
@@ -78,7 +80,7 @@ def stream():
         def generate():
             try:
                 logging.info(
-                    f"Starting stream for client {client_ip} from {url}")
+                    f"Starting stream for client {client_ip} from {url} using quality {quality}")
                 while True:
                     data = process.stdout.read(4096)
                     if not data:
