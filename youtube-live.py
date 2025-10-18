@@ -1,7 +1,7 @@
 import subprocess
 import json
 import logging
-from flask import Flask, request, Response, jsonify
+from flask import Flask, request, Response, jsonify, url_for, redirect
 from urllib.parse import unquote
 import os
 from threading import Lock
@@ -16,9 +16,12 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO, encoding='utf-8')
 
 # Global process manager to track running streamlink processes
+
+
 class StreamProcessManager:
     def __init__(self):
-        self.processes = {}  # {url: {'process': subprocess, 'quality': str, 'clients': set, 'start_time': datetime}}
+        # {url: {'process': subprocess, 'quality': str, 'clients': set, 'start_time': datetime}}
+        self.processes = {}
         self.lock = Lock()  # Thread safety for process management
 
     def get_process(self, url, quality):
@@ -26,31 +29,40 @@ class StreamProcessManager:
         client_ip = request.remote_addr
         user_agent = request.headers.get('User-Agent', 'Unknown')
         client_info = (client_ip, user_agent)
-        
+
         with self.lock:
             if url in self.processes:
-                # Add client to existing process
+                existing_process = self.processes[url]['process']
+
+                if existing_process.poll() is not None:
+                    # Process has ended, remove it and create a new one
+                    logging.info(f"Stream process for {url} has ended. Restarting.")
+                    del self.processes[url]
+                    return self.run_streamlink(url, quality, client_info)
+
                 self.processes[url]['clients'].add(client_info)
-                return self.processes[url]['process']
+                return existing_process
             else:
-                # Create new process
-                command = [
-                    'streamlink',
-                    url,
-                    quality,
-                    '--hls-live-restart',
-                    '--stdout'
-                ]
-                process = subprocess.Popen(
-                    command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                self.processes[url] = {
-                    'process': process,
-                    'quality': quality,
-                    'clients': {client_info},
-                    'start_time': datetime.now()
-                }
-                logging.info(f"Started new stream process for {url} with quality {quality}")
-                return process
+                return self.run_streamlink(url, quality, client_info)
+
+    def run_streamlink(self, url, quality, client_info):
+        # Create new process
+        command = [
+            'streamlink',
+            url,
+            quality,
+            '--hls-live-restart',
+            '--stdout'
+        ]
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.processes[url] = {
+            'process': process,
+            'quality': quality,
+            'clients': {client_info},
+            'start_time': datetime.now()
+        }
+        logging.info(f"Started new stream process for {url} with quality {quality}")
+        return process
 
     def remove_client(self, url, client_addr, user_agent='Unknown'):
         """Remove a client from the process. If no clients left, the process continues running."""
@@ -58,7 +70,8 @@ class StreamProcessManager:
         with self.lock:
             if url in self.processes:
                 self.processes[url]['clients'].discard(client_info)
-                logging.info(f"Client {client_addr} ({user_agent}) removed from stream {url}. Current clients: {len(self.processes[url]['clients'])}")
+                logging.info(
+                    f"Client {client_addr} ({user_agent}) removed from stream {url}. Current clients: {len(self.processes[url]['clients'])}")
 
     def kill_process(self, url):
         """Kill a specific process"""
@@ -108,7 +121,7 @@ class StreamProcessManager:
                             'ip': client_tuple,
                             'user_agent': 'Unknown'
                         })
-                
+
                 info.append({
                     'url': url,
                     'quality': process_info['quality'],
@@ -118,8 +131,14 @@ class StreamProcessManager:
                 })
             return info
 
+
 # Initialize the global process manager
 stream_manager = StreamProcessManager()
+
+
+@app.route('/')
+def index():
+    return redirect(url_for('manage_processes'))
 
 
 @app.route('/stream', methods=['GET'])
@@ -192,7 +211,8 @@ def stream():
                 # Don't terminate the process, just remove the client
                 stream_manager.remove_client(url, client_ip, user_agent)
             except Exception as e:
-                logging.error(f'Error in generator for {client_ip} ({user_agent}): {str(e)}')
+                logging.error(
+                    f'Error in generator for {client_ip} ({user_agent}): {str(e)}')
                 # Don't terminate the process, just remove the client
                 stream_manager.remove_client(url, client_ip, user_agent)
 
@@ -215,15 +235,16 @@ def stream():
 @app.route('/processes', methods=['GET', 'POST'])
 def manage_processes():
     """Manage running stream processes.
-    
+
     GET: Show a web page with running processes and kill buttons
     POST: Kill a specific process by URL or all processes
     """
     if request.method == 'POST':
         # Handle killing process(es) from web form
         url = request.form.get('url')  # URL of the specific process to kill
-        action = request.form.get('action', 'kill')  # Action: 'kill' or 'kill_all'
-        
+        # Action: 'kill' or 'kill_all'
+        action = request.form.get('action', 'kill')
+
         if action == 'kill_all':
             # Kill all processes
             stream_manager.kill_all_processes()
@@ -237,16 +258,17 @@ def manage_processes():
                 message = f'No process found for URL {url}'
         else:
             message = 'No URL provided to kill process'
-        
+
         # Return HTML page with the message and updated process list
         process_info = stream_manager.get_process_info()
         html = generate_processes_page(process_info, message)
         return html
-    
+
     # GET request - show the processes page
     process_info = stream_manager.get_process_info()
     html = generate_processes_page(process_info)
     return html
+
 
 def generate_processes_page(process_info, message=None):
     """Generate HTML page for process management"""
@@ -274,7 +296,7 @@ def generate_processes_page(process_info, message=None):
 '''
     if message:
         html += f'<div class="message">{message}</div>\n'
-    
+
     html += '''
     <h2>Running Processes</h2>
     <table>
@@ -304,7 +326,7 @@ def generate_processes_page(process_info, message=None):
             clients_list = '<br>'.join(client_items)
         else:
             clients_list = 'None'
-        
+
         html += f'''
         <tr>
             <td>{process['url']}</td>
