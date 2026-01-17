@@ -68,7 +68,7 @@ def get_video_id(session, url):
     r = session.get(url, timeout=20)
     html = r.text
 
-    # ✅ Handle @channel/live by redirecting to watch URL
+    # Handle @channel/live by redirecting to watch URL
     if "/@" in url and url.rstrip("/").endswith("/live"):
         watch_url = extract_watch_url_from_live_page(html)
         if not watch_url:
