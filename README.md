@@ -1,7 +1,7 @@
 # Current Issue
 Streamlink have an issue with their plugin resulting in a 403 due to changes with how youtube authorizes the stream url. Until that is fixed by streamlink you will get the same error here! <br>
 <br>
-<b> For now please use the non streamlink version as I have fixed this and hopefully will remain working </b>
+<b> For now please use the non streamlink version as I have fixed this and hopefully it will remain working </b>
 
 
 # youtube-to-m3u
