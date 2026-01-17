@@ -1,3 +1,7 @@
+# Current Issue
+Streamlink have an issue with their plugin resulting in a 403 due to changes with how youtube authorizes the stream url. Until that is fixed by streamlink you will get the same error here!
+
+
 # youtube-to-m3u
 Play YouTube live streams in any player
 
