@@ -1,3 +1,4 @@
 requests
 flask
-yt-dlp[default]
+streamlink
+youtube-dl
