@@ -32,7 +32,7 @@ To test streamlink install type in a new cmd/terminal window
 streamlink --version
 ```
 The output should be
-streamlink "version number" eg 7.1.1 <br>
+streamlink "version number" eg 8.1.2 <br>
 If it says unknown command/'streamlink' is not recognized as an internal or external command,
 operable program or batch file. <br>
 Then you need to make sure you have installed streamlink to path/environmental variables
