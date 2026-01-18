@@ -3,12 +3,12 @@ Streamlink have an issue with their plugin resulting in a 403 due to changes wit
 <br>
 TEMP FIX <br>
 <br>
-Replace the youtube.py found in for example C:\Program Files\Streamlink\pkgs\streamlink\plugins with the one from https://github.com/user-attachments/files/24692669/youtube.py <br>
+Replace the youtube.py found in for example C:\Program Files\Streamlink\pkgs\streamlink\plugins with the one from this pull request <br>
+https://github.com/streamlink/streamlink/pull/6777 <br>
+Raw url (copy and paste code) <br>
+https://raw.githubusercontent.com/streamlink/streamlink/2897257a09ac99f62cc7308c2afb2acac8e0ac04/src/streamlink/plugins/youtube.py <br>
 <br>
-This will only work with the streamlink versions and it only works with the watch url for the live stream and not the @channel_name/live url 
-<br> <br>
-Revert to the official streamlink youtube.py once they have fixed the issue
-
+Or wait for the pull request to be merged into streamlink and then you will need to update your streamlink to get the new plugin
 
 # youtube-to-m3u
 Play YouTube live streams in any player
