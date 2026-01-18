@@ -68,7 +68,7 @@ def get_video_id(session, url):
     r = session.get(url, timeout=20)
     html = r.text
 
-    # Handle @channel/live by redirecting to watch URL
+    # ✅ Handle @channel/live by redirecting to watch URL
     if "/@" in url and url.rstrip("/").endswith("/live"):
         watch_url = extract_watch_url_from_live_page(html)
         if not watch_url:
@@ -87,7 +87,7 @@ def get_video_id(session, url):
 
 
 # ------------------------------------------------------------
-# Extract HLS stream
+# Extract HLS stream using ANDROID client (from streamlink plugin)
 # ------------------------------------------------------------
 def extract_youtube_stream(youtube_url):
     session = requests.Session()
@@ -99,33 +99,34 @@ def extract_youtube_stream(youtube_url):
 
     logging.info(f"Using video ID: {video_id}")
 
+    # Fetch watch page to get API key if needed, but use default from plugin
     watch = session.get(f"https://www.youtube.com/watch?v={video_id}", timeout=20)
     page = watch.text
 
-    api_key = re.search(
+    api_key_match = re.search(
         r'["\']INNERTUBE_API_KEY["\']\s*:\s*["\']([^"\']+)["\']',
         page
     )
-    visitor = re.search(
-        r'["\']visitorData["\']\s*:\s*["\']([^"\']+)["\']',
-        page
-    )
+    api_key = api_key_match.group(1) if api_key_match else "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"
 
-    if not api_key or not visitor:
-        logging.error("Failed to extract InnerTube tokens")
-        return None
-
-    player_url = f"https://www.youtube.com/youtubei/v1/player?key={api_key.group(1)}"
+    player_url = f"https://www.youtube.com/youtubei/v1/player?key={api_key}"
 
     payload = {
+        "videoId": video_id,
+        "contentCheckOk": True,
+        "racyCheckOk": True,
         "context": {
             "client": {
-                "clientName": "IOS",
-                "clientVersion": "19.45.4",
-                "visitorData": visitor.group(1)
-            }
+                "clientName": "ANDROID",
+                "clientVersion": "19.45.36",
+                "platform": "DESKTOP",
+                "clientScreen": "EMBED",
+                "clientFormFactor": "UNKNOWN_FORM_FACTOR",
+                "browserName": "Chrome",
+            },
+            "user": {"lockedSafetyMode": False},
+            "request": {"useSsl": True},
         },
-        "videoId": video_id
     }
 
     r = session.post(player_url, json=payload, timeout=20)
@@ -148,7 +149,6 @@ def main():
 
     with open(OUTPUT_M3U, "w", encoding="utf-8") as f:
         f.write("#EXTM3U\n")
-
         for ch in channels:
             logging.info(f"--- Processing: {ch['name']} ---")
 
