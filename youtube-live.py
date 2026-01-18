@@ -15,7 +15,7 @@ app = Flask(__name__)
 # Set up logging with UTF-8 encoding
 logging.basicConfig(level=logging.INFO, encoding='utf-8')
 
-# Global process manager to track running streamlink processes
+# Global process manager to track running stream processes
 
 
 class StreamProcessManager:
@@ -38,21 +38,22 @@ class StreamProcessManager:
                     # Process has ended, remove it and create a new one
                     logging.info(f"Stream process for {url} has ended. Restarting.")
                     del self.processes[url]
-                    return self.run_streamlink(url, quality, client_info)
+                    return self.run_streaming(url, quality, client_info)
 
                 self.processes[url]['clients'].add(client_info)
                 return existing_process
             else:
-                return self.run_streamlink(url, quality, client_info)
+                return self.run_streaming(url, quality, client_info)
 
-    def run_streamlink(self, url, quality, client_info):
+    def run_streaming(self, url, quality, client_info):
         # Create new process
         command = [
-            'streamlink',
-            url,
+            'yt-dlp',
+            '-f',
             quality,
-            '--hls-live-restart',
-            '--stdout'
+            '-o',
+            '-',
+            url
         ]
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.processes[url] = {
@@ -151,43 +152,24 @@ def stream():
 
     try:
         # Get stream info with more detailed output
-        info_command = ['streamlink', '--json', '--loglevel', 'debug', url]
+        info_command = ['yt-dlp', '-J', '-v', url]
         info_process = subprocess.Popen(
             info_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         info_output, info_error = info_process.communicate()
 
         if info_process.returncode != 0:
             error_msg = info_error.decode('utf-8', errors='replace')
-            logging.error(f'Streamlink error: {error_msg}')
+            logging.error(f'yt-dlp error: {error_msg}')
             return jsonify({'error': 'Failed to retrieve stream info', 'details': error_msg}), 500
 
-        # Parse the JSON output
         stream_info = json.loads(info_output.decode('utf-8', errors='replace'))
+        formats = stream_info.get("formats", [])
 
-        # Check if streams are available
-        if 'streams' not in stream_info or not stream_info['streams']:
-            if 'youtube.com' in url.lower() or 'youtu.be' in url.lower():
-                yt_command = ['youtube-dl', '--get-url',
-                              '--youtube-skip-dash-manifest', url]
-                yt_process = subprocess.Popen(
-                    yt_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                yt_url, yt_error = yt_process.communicate()
+        if quality != 'best':
+            selected_quality = [f for f in formats if f.get("height") == quality]
+            quality = selected_quality[0].get("format_id")
 
-                if yt_process.returncode != 0:
-                    logging.error(
-                        f"youtube-dl error: {yt_error.decode('utf-8', errors='replace')}")
-                    return jsonify({'error': 'No valid streams found'}), 404
-
-                url = yt_url.decode('utf-8', errors='replace').strip()
-                info_command = ['streamlink', '--json', url]
-                info_process = subprocess.Popen(
-                    info_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                info_output, info_error = info_process.communicate()
-                stream_info = json.loads(
-                    info_output.decode('utf-8', errors='replace'))
-
-        best_quality = stream_info['streams'].get(quality)
-        if not best_quality:
+        if not quality or len(formats) == 0:
             return jsonify({'error': 'No valid streams found'}), 404
 
         # Get or create the process for this URL
