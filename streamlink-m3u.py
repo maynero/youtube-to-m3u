@@ -172,15 +172,14 @@ def stream():
 
         # Parse the JSON output
         stream_info = json.loads(info_output.decode('utf-8', errors='replace'))
-        logging.info(f"Stream info retrieved for {url}: {stream_info.get('title', 'No title')} with qualities: {list(stream_info.get('streams', {}).keys())}")
+        logging.info(
+            f"Stream info retrieved for {url}: {stream_info.get('title', 'No title')} with qualities: {list(stream_info.get('streams', {}).keys())}")
 
         # Check if streams are available
-        if 'streams' not in stream_info or not stream_info['streams']:
-            if 'youtube.com' in url.lower() or 'youtu.be' in url.lower():
-                yt_command = ['youtube-dl', '--get-url',
-                              '--youtube-skip-dash-manifest', url]
-                yt_process = subprocess.Popen(
-                    yt_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if 'youtube.com' in url.lower() or 'youtu.be' in url.lower():
+            if 'streams' not in stream_info or not stream_info['streams']:
+                yt_command = ['youtube-dl', '--get-url', '--youtube-skip-dash-manifest', url]
+                yt_process = subprocess.Popen(yt_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 yt_url, yt_error = yt_process.communicate()
 
                 if yt_process.returncode != 0:
@@ -190,11 +189,9 @@ def stream():
 
                 url = yt_url.decode('utf-8', errors='replace').strip()
                 info_command = ['streamlink', '--json', url]
-                info_process = subprocess.Popen(
-                    info_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                info_process = subprocess.Popen(info_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 info_output, info_error = info_process.communicate()
-                stream_info = json.loads(
-                    info_output.decode('utf-8', errors='replace'))
+                stream_info = json.loads(info_output.decode('utf-8', errors='replace'))
 
         best_quality = stream_info['streams'].get(quality)
         if not best_quality:
