@@ -24,7 +24,7 @@ class StreamProcessManager:
         self.processes = {}
         self.lock = Lock()  # Thread safety for process management
 
-    def get_process(self, url, quality):
+    def get_process(self, url, quality, decryption_key=None):
         """Get an existing process or create a new one if it doesn't exist"""
         client_ip = request.remote_addr
         user_agent = request.headers.get('User-Agent', 'Unknown')
@@ -43,9 +43,12 @@ class StreamProcessManager:
                 self.processes[url]['clients'].add(client_info)
                 return existing_process
             else:
-                return self.run_streamlink(url, quality, client_info)
+                if decryption_key:
+                    return self.run_streamlink(url, quality, client_info, decryption_key)
+                else:
+                    return self.run_streamlink(url, quality, client_info)
 
-    def run_streamlink(self, url, quality, client_info):
+    def run_streamlink(self, url, quality, client_info, decryption_key=None):
         # Create new process
         command = [
             'streamlink',
@@ -54,6 +57,11 @@ class StreamProcessManager:
             '--hls-live-restart',
             '--stdout'
         ]
+
+        if decryption_key:
+            command.extend(['-decryption_key', decryption_key])
+
+        logging.info(f"Running command: {' '.join(command)}")
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.processes[url] = {
             'process': process,
@@ -148,6 +156,7 @@ def stream():
         return jsonify({'error': 'URL parameter is required'}), 400
 
     quality = request.args.get('quality', 'best')
+    decryption_key = request.args.get('decryption_key')  # Optional decryption key for encrypted streams
 
     try:
         # Get stream info with more detailed output
@@ -163,6 +172,7 @@ def stream():
 
         # Parse the JSON output
         stream_info = json.loads(info_output.decode('utf-8', errors='replace'))
+        logging.info(f"Stream info retrieved for {url}: {stream_info.get('title', 'No title')} with qualities: {list(stream_info.get('streams', {}).keys())}")
 
         # Check if streams are available
         if 'streams' not in stream_info or not stream_info['streams']:
@@ -191,7 +201,7 @@ def stream():
             return jsonify({'error': 'No valid streams found'}), 404
 
         # Get or create the process for this URL
-        process = stream_manager.get_process(url, quality)
+        process = stream_manager.get_process(url, quality, decryption_key)
         client_ip = request.remote_addr
         user_agent = request.headers.get('User-Agent', 'Unknown')
 
@@ -276,7 +286,7 @@ def generate_processes_page(process_info, message=None):
 <!DOCTYPE html>
 <html>
 <head>
-    <title>YouTube-to-M3U Process Manager</title>
+    <title>Streamlink M3U Process Manager</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
         table { border-collapse: collapse; width: 100%; margin-top: 20px; }
@@ -292,7 +302,7 @@ def generate_processes_page(process_info, message=None):
     </style>
 </head>
 <body>
-    <h1>YouTube-to-M3U Process Manager</h1>
+    <h1>Streamlink M3U Process Manager</h1>
 '''
     if message:
         html += f'<div class="message">{message}</div>\n'

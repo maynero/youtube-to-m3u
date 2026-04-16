@@ -1,4 +1,4 @@
-requests
-flask
-streamlink
-youtube-dl
+requests==2.33.1
+flask==3.1.3
+streamlink @ git+https://github.com/maynero/streamlink-drm@master
+youtube-dl==2021.12.17
