@@ -58,6 +58,8 @@ class StreamProcessManager:
             url,
             quality,
             '--hls-live-restart',
+            '--ffmpeg-fout',
+            "mpegts",
             '--stdout'
         ]
 
