@@ -83,8 +83,9 @@ The process manager shows active stream processes, connected clients, start time
 
 These environment variables control Streamlink logging:
 
-- `STREAMLINK_LOG_ENABLED`: Set to `false` to disable Streamlink logfile output. Defaults to `true`.
-- `STREAMLINK_LOG_LEVEL`: Streamlink log level. Defaults to `info`.
+- `LOG_LEVEL`: Global log level. Defaults to `INFO`
+- `STREAMLINK_LOG_ENABLED`: Set to `true` to enable Streamlink logfile output. Defaults to `false`.
+- `STREAMLINK_LOG_LEVEL`: Streamlink log level. Defaults to `LOG_LEVEL` value.
 - `STREAMLINK_LOG_FILE`: Log file path. Defaults to `/tmp/streamlink.log`.
 
 Docker example:
