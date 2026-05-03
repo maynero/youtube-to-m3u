@@ -1,4 +1,9 @@
-FROM python:3.10-slim
+FROM python:3.12-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ffmpeg \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -17,4 +22,4 @@ ENV PYTHONUNBUFFERED 1
 EXPOSE 6095
 
 # Specify the command to run your application
-CMD ["python", "youtube-live.py"]
+CMD ["python", "streamlink-m3u.py"]

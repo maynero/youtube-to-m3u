@@ -12,8 +12,19 @@ os.environ['PYTHONIOENCODING'] = 'utf-8'
 
 app = Flask(__name__)
 
-# Set up logging with UTF-8 encoding
-logging.basicConfig(level=logging.INFO, encoding='utf-8')
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+STREAMLINK_LOG_ENABLED = os.getenv("STREAMLINK_LOG_ENABLED", "false").lower() == "true"
+STREAMLINK_LOG_LEVEL = os.getenv("STREAMLINK_LOG_LEVEL", LOG_LEVEL.lower())
+STREAMLINK_LOG_FILE = os.getenv("STREAMLINK_LOG_FILE", "/tmp/streamlink.log")
+
+# Set up logging
+log_level = getattr(logging, LOG_LEVEL.upper(), logging.INFO)
+logging.basicConfig(
+    level=log_level,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M"
+)
+logger = logging.getLogger()
 
 # Global process manager to track running streamlink processes
 
@@ -24,44 +35,99 @@ class StreamProcessManager:
         self.processes = {}
         self.lock = Lock()  # Thread safety for process management
 
-    def get_process(self, url, quality):
-        """Get an existing process or create a new one if it doesn't exist"""
-        client_ip = request.remote_addr
-        user_agent = request.headers.get('User-Agent', 'Unknown')
-        client_info = (client_ip, user_agent)
+    def get_process(self, url):
+        """Get an existing active process for the URL, or None if it doesn't exist"""
+        with self.lock:
+            process_info = self.processes.get(url)
+            if process_info and process_info['process'].poll() is None:
+                return process_info['process']
+
+            # Process has ended or doesn't exist, remove it from tracking.
+            if url in self.processes:
+                logger.info(f"Stream process for {url} has ended. Removing from tracking.")
+                del self.processes[url]
+            return None
+
+    def attach_or_create_process(self, url, quality, decryption_key=None, is_youtube=False, client_info=None):
+        """Attach a client to an existing process or create a new one."""
+        logger.debug(
+            f"Attaching or creating process for URL: {url} with quality: {quality} and decryption_key: {decryption_key}")
+        if client_info is None:
+            client_ip = request.remote_addr
+            user_agent = request.headers.get('User-Agent', 'Unknown')
+            client_info = (client_ip, user_agent)
 
         with self.lock:
+            process_info = self.processes.get(url)
+            if process_info and process_info['process'].poll() is None:
+                process_info['clients'].add(client_info)
+                return process_info['process']
+
             if url in self.processes:
-                existing_process = self.processes[url]['process']
+                logger.info(f"Stream process for {url} has ended. Restarting.")
+                del self.processes[url]
 
-                if existing_process.poll() is not None:
-                    # Process has ended, remove it and create a new one
-                    logging.info(f"Stream process for {url} has ended. Restarting.")
-                    del self.processes[url]
-                    return self.run_streamlink(url, quality, client_info)
+            if is_youtube:
+                return self.run_youtube_stream(url, quality, client_info)
+            return self.run_streamlink(url, quality, client_info, decryption_key)
 
-                self.processes[url]['clients'].add(client_info)
-                return existing_process
-            else:
-                return self.run_streamlink(url, quality, client_info)
-
-    def run_streamlink(self, url, quality, client_info):
+    def run_streamlink(self, url, quality, client_info, decryption_key=None):
         # Create new process
         command = [
             'streamlink',
             url,
             quality,
             '--hls-live-restart',
+            '--ffmpeg-no-validation',
+            '--ffmpeg-fout',
+            "mpegts",
             '--stdout'
         ]
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        if decryption_key:
+            command.extend(['-decryption_key', decryption_key])
+
+        if STREAMLINK_LOG_ENABLED:
+            command.extend(['--logfile', STREAMLINK_LOG_FILE])
+            command.extend(['--loglevel', STREAMLINK_LOG_LEVEL])
+
+        logger.info(f"Running command: {' '.join(command)}")
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
         self.processes[url] = {
             'process': process,
             'quality': quality,
             'clients': {client_info},
             'start_time': datetime.now()
         }
-        logging.info(f"Started new stream process for {url} with quality {quality}")
+        logger.info(f"Started new stream process for {url} with quality {quality}")
+        return process
+
+    def run_youtube_stream(self, url, quality, client_info):
+        # Create new process
+        command = [
+            'yt-dlp',
+            '--quiet',
+            '--no-warnings',
+            '--remote-components',
+            '--hls-use-mpegts',
+            'ejs:npm',
+            '-o',
+            '-',
+            url
+        ]
+
+        if quality:
+            command.extend(['--format', quality])
+
+        logger.info(f"Running command: {' '.join(command)}")
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.processes[url] = {
+            'process': process,
+            'quality': quality,
+            'clients': {client_info},
+            'start_time': datetime.now()
+        }
+        logger.info(f"Started new stream process for {url} with quality {quality}")
         return process
 
     def remove_client(self, url, client_addr, user_agent='Unknown'):
@@ -70,34 +136,45 @@ class StreamProcessManager:
         with self.lock:
             if url in self.processes:
                 self.processes[url]['clients'].discard(client_info)
-                logging.info(
+                logger.info(
                     f"Client {client_addr} ({user_agent}) removed from stream {url}. Current clients: {len(self.processes[url]['clients'])}")
 
     def kill_process(self, url):
         """Kill a specific process"""
         with self.lock:
-            if url in self.processes:
-                process_info = self.processes[url]
-                process = process_info['process']
-                if process.poll() is None:  # Process is still running
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)  # Wait for process to finish
-                    except subprocess.TimeoutExpired:
-                        process.kill()  # Force kill if it doesn't terminate gracefully
-                    process.stdout.close()
-                    process.stderr.close()
-                    logging.info(f"Killed stream process for {url}")
-                del self.processes[url]
-                return True
+            process_info = self.processes.pop(url, None)
+
+        if not process_info:
             return False
+
+        self._terminate_process(url, process_info['process'])
+        return True
 
     def kill_all_processes(self):
         """Kill all running processes"""
         with self.lock:
-            urls_to_remove = list(self.processes.keys())
-            for url in urls_to_remove:
-                self.kill_process(url)
+            processes_to_kill = list(self.processes.items())
+            self.processes.clear()
+
+        for url, process_info in processes_to_kill:
+            self._terminate_process(url, process_info['process'])
+
+    def _terminate_process(self, url, process):
+        """Terminate a stream process and close any open pipes."""
+        if process.poll() is None:  # Process is still running
+            process.terminate()
+            try:
+                process.wait(timeout=5)  # Wait for process to finish
+            except subprocess.TimeoutExpired:
+                process.kill()  # Force kill if it doesn't terminate gracefully
+                process.wait()
+
+        if process.stdout:
+            process.stdout.close()
+        if process.stderr:
+            process.stderr.close()
+
+        logger.info(f"Killed stream process for {url}")
 
     def get_process_info(self):
         """Get information about all running processes"""
@@ -147,66 +224,87 @@ def stream():
     if not url:
         return jsonify({'error': 'URL parameter is required'}), 400
 
-    quality = request.args.get('quality', 'best')
+    is_youtube = ('youtube.com' in url.lower() or 'youtu.be' in url.lower())
+    requested_quality = request.args.get('quality', None) if is_youtube else request.args.get('quality', 'best')
+    decryption_key = request.args.get('decryption_key')  # Optional decryption key for encrypted streams
+    client_info = (request.remote_addr, request.headers.get('User-Agent', 'Unknown'))
+    existing_process = stream_manager.get_process(url)
 
     try:
-        # Get stream info with more detailed output
-        info_command = ['streamlink', '--json', '--loglevel', 'debug', url]
-        info_process = subprocess.Popen(
-            info_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        info_output, info_error = info_process.communicate()
-
-        if info_process.returncode != 0:
-            error_msg = info_error.decode('utf-8', errors='replace')
-            logging.error(f'Streamlink error: {error_msg}')
-            return jsonify({'error': 'Failed to retrieve stream info', 'details': error_msg}), 500
-
-        # Parse the JSON output
-        stream_info = json.loads(info_output.decode('utf-8', errors='replace'))
-
-        # Check if streams are available
-        if 'streams' not in stream_info or not stream_info['streams']:
-            if 'youtube.com' in url.lower() or 'youtu.be' in url.lower():
-                yt_command = ['youtube-dl', '--get-url',
-                              '--youtube-skip-dash-manifest', url]
-                yt_process = subprocess.Popen(
-                    yt_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                yt_url, yt_error = yt_process.communicate()
-
-                if yt_process.returncode != 0:
-                    logging.error(
-                        f"youtube-dl error: {yt_error.decode('utf-8', errors='replace')}")
-                    return jsonify({'error': 'No valid streams found'}), 404
-
-                url = yt_url.decode('utf-8', errors='replace').strip()
-                info_command = ['streamlink', '--json', url]
-                info_process = subprocess.Popen(
-                    info_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if existing_process is None:
+            if is_youtube:
+                logger.debug(f"Retrieving stream info for YouTube URL: {url}")
+                info_command = ['yt-dlp', '--dump-json', url]
+                info_process = subprocess.Popen(info_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 info_output, info_error = info_process.communicate()
-                stream_info = json.loads(
-                    info_output.decode('utf-8', errors='replace'))
+            else:
+                logger.debug(f"Retrieving stream info for URL: {url}")
+                info_command = ['streamlink', '--json', '--loglevel', 'debug', url]
+                info_process = subprocess.Popen(info_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                info_output, info_error = info_process.communicate()
 
-        best_quality = stream_info['streams'].get(quality)
-        if not best_quality:
-            return jsonify({'error': 'No valid streams found'}), 404
+            if info_process.returncode != 0:
+                error_msg = info_error.decode('utf-8', errors='replace')
+                logging.error(f'Streamlink error: {error_msg}')
+                return jsonify({'error': 'Failed to retrieve stream info', 'details': error_msg}), 500
 
-        # Get or create the process for this URL
-        process = stream_manager.get_process(url, quality)
-        client_ip = request.remote_addr
-        user_agent = request.headers.get('User-Agent', 'Unknown')
+            stream_info = json.loads(info_output.decode('utf-8', errors='replace'))
+            logger.debug(f"Stream info retrieved: {stream_info}")
+
+            if is_youtube:
+                formats = stream_info.get('formats') or []
+                available_heights = sorted({
+                    str(stream_format.get('height'))
+                    for stream_format in formats
+                    if stream_format.get('height') is not None
+                })
+                logger.info(
+                    f"Stream info retrieved for {url}: {stream_info.get('title', 'No title')} with qualities: {', '.join(available_heights)}")
+                if requested_quality:
+                    best_quality = next(
+                        (
+                            stream_format.get('format_id')
+                            for stream_format in formats
+                            if str(stream_format.get('height')) == requested_quality
+                            or stream_format.get('format_id') == requested_quality
+                        ),
+                        None
+                    )
+                else:
+                    best_quality = stream_info.get('format_id', None)
+            else:
+                stream_qualities = list(stream_info.get('streams', {}).keys())
+                logger.info(
+                    f"Stream info retrieved for {url}: {stream_info.get('title', 'No title')} with qualities: {stream_qualities}")
+                logger.info(f"Requested quality: {requested_quality}")
+                best_quality = requested_quality if requested_quality in stream_qualities else None
+
+            if not best_quality:
+                return jsonify({'error': 'No valid streams found or requested quality not available'}), 404
+
+            quality = best_quality
+        else:
+            quality = stream_manager.processes[url]['quality']
+
+        # Create or reattach to the process for this URL.
+        process = stream_manager.attach_or_create_process(url, quality, decryption_key, is_youtube, client_info)
+        logger.debug(f"Process for {url} is running with PID {process.pid} and quality {quality}")
+
+        client_ip = client_info[0]
+        user_agent = client_info[1]
 
         def generate():
             try:
-                logging.info(
+                logger.info(
                     f"Client {client_ip} ({user_agent}) connected to stream {url} using quality {quality}")
                 while True:
-                    data = process.stdout.read(4096)
+                    data = process.stdout.read(8192)
                     if not data:
                         # This could mean the stream ended
                         break
                     yield data
             except GeneratorExit:
-                logging.info(
+                logger.info(
                     f"Client {client_ip} ({user_agent}) disconnected from stream {url}")
                 # Don't terminate the process, just remove the client
                 stream_manager.remove_client(url, client_ip, user_agent)
@@ -222,13 +320,13 @@ def stream():
         def cleanup():
             # Don't terminate the process, just remove the client
             stream_manager.remove_client(url, client_ip, user_agent)
-            logging.info(
+            logger.info(
                 f"Client {client_ip} ({user_agent}) cleaned up from stream {url}")
 
         return response
 
     except Exception as e:
-        logging.error(f'Error occurred: {str(e)}')
+        logging.exception(f'Error occurred: {str(e)}')
         return jsonify({'error': str(e)}), 500
 
 
@@ -276,7 +374,7 @@ def generate_processes_page(process_info, message=None):
 <!DOCTYPE html>
 <html>
 <head>
-    <title>YouTube-to-M3U Process Manager</title>
+    <title>Streamlink M3U Process Manager</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
         table { border-collapse: collapse; width: 100%; margin-top: 20px; }
@@ -292,7 +390,7 @@ def generate_processes_page(process_info, message=None):
     </style>
 </head>
 <body>
-    <h1>YouTube-to-M3U Process Manager</h1>
+    <h1>Streamlink M3U Process Manager</h1>
 '''
     if message:
         html += f'<div class="message">{message}</div>\n'
@@ -358,4 +456,5 @@ def generate_processes_page(process_info, message=None):
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=6095)
+    from waitress import serve
+    serve(app, host='0.0.0.0', port=6095)
