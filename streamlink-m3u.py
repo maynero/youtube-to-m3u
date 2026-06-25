@@ -2,6 +2,7 @@ import subprocess
 import json
 import logging
 from flask import Flask, request, Response, jsonify, url_for, redirect
+from markupsafe import escape
 from urllib.parse import unquote
 import os
 from threading import Lock
@@ -13,6 +14,12 @@ os.environ['PYTHONIOENCODING'] = 'utf-8'
 app = Flask(__name__)
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+try:
+    PROCESS_LIMIT = int(os.getenv("PROCESS_LIMIT", "0"))
+    if PROCESS_LIMIT < 0:
+        PROCESS_LIMIT = 0
+except ValueError:
+    PROCESS_LIMIT = 0
 STREAMLINK_LOG_ENABLED = os.getenv("STREAMLINK_LOG_ENABLED", "false").lower() == "true"
 STREAMLINK_LOG_LEVEL = os.getenv("STREAMLINK_LOG_LEVEL", LOG_LEVEL.lower())
 STREAMLINK_LOG_FILE = os.getenv("STREAMLINK_LOG_FILE", "/tmp/streamlink.log")
@@ -25,6 +32,12 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M"
 )
 logger = logging.getLogger()
+logger.info(f"Process limit: {'unlimited' if PROCESS_LIMIT == 0 else PROCESS_LIMIT}")
+
+
+class ProcessLimitError(Exception):
+    pass
+
 
 # Global process manager to track running streamlink processes
 
@@ -57,6 +70,8 @@ class StreamProcessManager:
             user_agent = request.headers.get('User-Agent', 'Unknown')
             client_info = (client_ip, user_agent)
 
+        unused_processes = []
+
         with self.lock:
             process_info = self.processes.get(url)
             if process_info and process_info['process'].poll() is None:
@@ -67,9 +82,30 @@ class StreamProcessManager:
                 logger.info(f"Stream process for {url} has ended. Restarting.")
                 del self.processes[url]
 
+            if PROCESS_LIMIT and len(self.processes) >= PROCESS_LIMIT:
+                logger.warning(f"Process limit of {PROCESS_LIMIT} reached. Attempting to free up resources by killing unused processes.")
+                for existing_url, existing_info in list(self.processes.items()):
+                    if not existing_info['clients']:
+                        unused_processes.append((existing_url, existing_info['process']))
+                        del self.processes[existing_url]
+                        if len(self.processes) < PROCESS_LIMIT:
+                            break
+
+            if PROCESS_LIMIT and len(self.processes) >= PROCESS_LIMIT:
+                logger.error(f"Process limit of {PROCESS_LIMIT} still reached after cleanup. Cannot start new process for {url}")
+                raise ProcessLimitError("Process limit reached. Please try again later.")
+
+        for evicted_url, evicted_process in unused_processes:
+            logger.info(f"Killing unused process for {evicted_url} to free up resources")
+            self._terminate_process(evicted_url, evicted_process)
+
+        with self.lock:
             if is_youtube:
-                return self.run_youtube_stream(url, quality, client_info)
-            return self.run_streamlink(url, quality, client_info, decryption_key)
+                process = self.run_youtube_stream(url, quality, client_info)
+            else:
+                process = self.run_streamlink(url, quality, client_info, decryption_key)
+
+        return process
 
     def run_streamlink(self, url, quality, client_info, decryption_key=None):
         # Create new process
@@ -325,6 +361,8 @@ def stream():
 
         return response
 
+    except ProcessLimitError as e:
+        return jsonify({'error': str(e)}), 503
     except Exception as e:
         logging.exception(f'Error occurred: {str(e)}')
         return jsonify({'error': str(e)}), 500
@@ -393,7 +431,7 @@ def generate_processes_page(process_info, message=None):
     <h1>Streamlink M3U Process Manager</h1>
 '''
     if message:
-        html += f'<div class="message">{message}</div>\n'
+        html += f'<div class="message">{escape(message)}</div>\n'
 
     html += '''
     <h2>Running Processes</h2>
@@ -416,25 +454,27 @@ def generate_processes_page(process_info, message=None):
             client_items = []
             for client in process['clients']:
                 if isinstance(client, dict) and 'ip' in client:
-                    client_display = f"{client['ip']} ({client['user_agent']})"
+                    client_display = f"{escape(client['ip'])} ({escape(client['user_agent'])})"
                 else:
-                    # Fallback for simple string format
-                    client_display = str(client)
+                    client_display = str(escape(str(client)))
                 client_items.append(client_display)
             clients_list = '<br>'.join(client_items)
         else:
             clients_list = 'None'
 
+        safe_url = escape(process['url'])
+        safe_quality = escape(process['quality'])
+
         html += f'''
         <tr>
-            <td>{process['url']}</td>
-            <td>{process['quality']}</td>
+            <td>{safe_url}</td>
+            <td>{safe_quality}</td>
             <td>{clients_list}</td>
             <td class="{status_class}">{status_text}</td>
             <td>{process['start_time']}</td>
             <td>
                 <form method="post" style="display: inline;">
-                    <input type="hidden" name="url" value="{process['url']}">
+                    <input type="hidden" name="url" value="{safe_url}">
                     <input type="hidden" name="action" value="kill">
                     <button type="submit" class="kill-btn" onclick="return confirm('Are you sure you want to kill this process?')">Kill</button>
                 </form>
@@ -457,4 +497,4 @@ def generate_processes_page(process_info, message=None):
 
 if __name__ == '__main__':
     from waitress import serve
-    serve(app, host='0.0.0.0', port=6095)
+    serve(app, host='0.0.0.0', port=6095, threads=16)
