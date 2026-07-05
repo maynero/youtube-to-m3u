@@ -35,5 +35,5 @@ jobs:
           context: .
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}:${{ github.event.inputs.image_tag }}
+            ghcr.io/${{ github.repository }}:${{ github.event.inputs.image_tag || 'latest' }}
             ghcr.io/${{ github.repository }}:${{ github.sha }}
